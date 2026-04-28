@@ -108,6 +108,9 @@ void ProtocolGame::parseMessage(const InputMessagePtr& msg)
                 case Proto::GameServerBugReport:
                     parseBugReport(msg);
                     break;
+                case Proto::GameServerNpcDialog:
+                    parseNpcDialog(msg);
+                    break;
                 case Proto::GameServerPingBack:
                 case Proto::GameServerPing:
                     if (((opcode == Proto::GameServerPing) && (g_game.getFeature(Otc::GameClientPing))) ||
@@ -759,6 +762,27 @@ void ProtocolGame::parseBugReport(const InputMessagePtr& msg)
 {
     const bool canReportBugs = msg->getU8() > 0;
     g_game.setCanReportBugs(canReportBugs);
+}
+
+void ProtocolGame::parseNpcDialog(const InputMessagePtr& msg)
+{
+    uint8_t noData = msg->getU8();
+    if (noData) {
+        return;
+    }
+
+    uint8_t count = msg->getU8();
+    g_logger.error("Npc count {}", count);
+    for (uint8_t i = 0; i < count; i++) {
+        uint32_t npcId = msg->getU32(); // npcId
+        g_logger.error("Npc id {}", npcId);
+
+        uint8_t buttonCount = msg->getU8();
+        for (uint8_t o = 0; o < buttonCount; o++) {
+            msg->getU8(); // buttonId
+            msg->getString(); // button text
+        }
+    }
 }
 
 void ProtocolGame::parsePendingGame(const InputMessagePtr&)
@@ -2476,7 +2500,7 @@ void ProtocolGame::parsePlayerStats(const InputMessagePtr& msg) const
 
     const uint64_t experience = g_game.getFeature(Otc::GameDoubleExperience) ? msg->getU64() : msg->getU32();
     const uint16_t level = g_game.getFeature(Otc::GameLevelU16) ? msg->getU16() : msg->getU8();
-    const uint8_t levelPercent;
+    uint8_t levelPercent;
 	if (g_game.getClientVersion() >= 1512) {
 		levelPercent = msg->getU16() / 100;
 	} else {
@@ -4881,6 +4905,11 @@ void ProtocolGame::parseCyclopediaCharacterInfo(const InputMessagePtr& msg)
             stats.experience = msg->getU64();
             stats.level = msg->getU16();
             stats.levelPercent = msg->getU8();
+            if (g_game.getClientVersion() >= 1512) {
+                stats.levelPercent = msg->getU16() / 100;
+            } else {
+                stats.levelPercent = msg->getU8();;
+            }
             stats.baseExpGain = msg->getU16();
             if (g_game.getFeature(Otc::GameTournamentPackets)) {
                 msg->getU32(); // tournament exp(deprecated)
