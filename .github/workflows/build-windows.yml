@@ -158,3 +158,67 @@ jobs:
           name: otclient-${{ matrix.os }}-${{ matrix.buildtype }}
           path: |
             ${{ github.workspace }}/artifacts
+            
+
+      - name: Prepare release package
+        shell: pwsh
+        run: |
+          $artifactDir = "$env:GITHUB_WORKSPACE\release"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+          # Find exe
+          $exes = Get-ChildItem -Recurse -Filter "*.exe" |
+                  Where-Object { $_.Name -like "otclient*.exe" }
+            
+          if (-not $exes) {
+            Write-Error "No executables found!"
+            exit 1
+          }
+            
+          foreach ($exe in $exes) {
+            Copy-Item $exe.FullName -Destination $artifactDir
+          }
+
+          Copy-Item $exe.FullName -Destination $artifactDir
+
+          # Copy DLLs next to exe
+          Get-ChildItem -Path $exe.Directory.FullName -Filter "*.dll" | ForEach-Object {
+            Copy-Item $_.FullName -Destination $artifactDir
+          }
+
+          # Copy all LUA files
+          Get-ChildItem -Recurse -Filter "*.lua" | ForEach-Object {
+            $dest = Join-Path $artifactDir $_.FullName.Substring($env:GITHUB_WORKSPACE.Length)
+            New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+            Copy-Item $_.FullName -Destination $dest
+          }
+
+          # Copy required folders
+          $folders = @("data", "mods", "modules", "records")
+          foreach ($folder in $folders) {
+            if (Test-Path $folder) {
+              Copy-Item $folder -Destination $artifactDir -Recurse -Force
+            }
+          }
+
+          # Create ZIP
+          $zipPath = "$env:GITHUB_WORKSPACE\otclient-${{ github.run_number }}.zip"
+          Compress-Archive -Path "$artifactDir\*" -DestinationPath $zipPath
+
+          echo "zipPath=$zipPath" >> $env:GITHUB_OUTPUT
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: otclient-zip
+          path: ${{ steps.prepare-release-package.outputs.zipPath }}
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          files: ${{ github.workspace }}/otclient-${{ github.run_number }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
