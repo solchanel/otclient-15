@@ -136,6 +136,8 @@ public:
     void sendMarketAcceptOffer(uint32_t timestamp, uint16_t counter, uint16_t amount);
     void sendPreyAction(uint8_t slot, uint8_t actionType, uint16_t index);
     void sendPreyRequest();
+    void sendTaskBoardAction(uint8_t option, uint16_t value = 0, uint16_t extraValue = 0);
+    void sendSoulSealsAction(uint16_t raceId);
     void sendOpenPortableForge();
     void sendForgeRequest(Otc::ForgeAction_t actionType, bool convergence = false, uint16_t firstItemid = 0, uint8_t firstItemTier = 0, uint16_t secondItemId = 0, bool improveChance = false, bool tierLoss = false);
     void sendForgeBrowseHistoryRequest(uint16_t page);
@@ -381,7 +383,10 @@ private:
     void parseBestiaryCharmsData(const InputMessagePtr& msg);
 
     // 15x
-    void parseWeeklyTaskData(const InputMessagePtr& msg);
+    void parseTaskBoardData(const InputMessagePtr& msg);
+    void parseTaskBoardBountyData(const InputMessagePtr& msg);
+    void parseTaskBoardWeeklyData(const InputMessagePtr& msg);
+    void parseTaskBoardShopData(const InputMessagePtr& msg);
     void parseWeaponProficiencyExperience(const InputMessagePtr& msg);
     void parseWeaponProficiencyInfo(const InputMessagePtr& msg);
 

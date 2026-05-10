@@ -37,6 +37,7 @@
 #include "thingtype.h"
 #include "thingtypemanager.h"
 #include "tile.h"
+#include "taskboard.h"
 #include "framework/core/eventdispatcher.h"
 #include "framework/net/inputmessage.h"
 #include "paperdollmanager.h"
@@ -168,8 +169,8 @@ void ProtocolGame::parseMessage(const InputMessagePtr& msg)
                 case Proto::GameServerFloorDescription:
                     parseFloorDescription(msg);
                     break;
-                case Proto::GameServerWeeklyTaskData:
-                    parseWeeklyTaskData(msg);
+                case Proto::GameServerTaskBoard:
+                    parseTaskBoardData(msg);
                     break;
                 case Proto::GameServerWeaponProficiencyExperience:
                     parseWeaponProficiencyExperience(msg);
@@ -4382,6 +4383,36 @@ void ProtocolGame::parseBestiaryTracker(const InputMessagePtr& msg)
 
 void ProtocolGame::parseTaskHuntingBasicData(const InputMessagePtr& msg)
 {
+    if (g_game.getClientVersion() >= 1521) {
+        const uint16_t masteredCount = msg->getU16();
+        std::vector<std::map<std::string, std::string>> soulsealEntries;
+        soulsealEntries.reserve(masteredCount);
+
+        for (uint16_t i = 0; i < masteredCount; ++i) {
+            const uint16_t raceId = msg->getU16();
+            if (raceId == 0) {
+                continue;
+            }
+
+            TaskBoardSoulsealEntryData entry;
+            entry.raceId = raceId;
+
+            const auto& raceData = g_things.getRaceData(raceId);
+            entry.name = raceData.name.empty() ? std::to_string(raceId) : raceData.name;
+
+            soulsealEntries.emplace_back(std::map<std::string, std::string>{
+                { "name", entry.name },
+                { "raceId", std::to_string(entry.raceId) },
+                { "soulsealPoints", std::to_string(entry.soulsealPoints) },
+                { "category", std::to_string(entry.category) },
+                { "done", std::to_string(entry.done) }
+            });
+        }
+
+        g_lua.callGlobalField("g_game", "onSoulsealsData", soulsealEntries);
+        return;
+    }
+
     const uint16_t preys = msg->getU16();
     for (auto i = 0; i < preys; ++i) {
         msg->getU16(); // RaceID
@@ -6464,11 +6495,6 @@ void ProtocolGame::parseHighscores(const InputMessagePtr& msg)
     g_game.processHighscore(serverName, world, worldType, battlEye, vocations, categories, page, totalPages, highscores, entriesTs);
 }
 
-void ProtocolGame::parseWeeklyTaskData(const InputMessagePtr& msg)
-{
-    // client cannot request so not needed here
-}
-
 void ProtocolGame::parseWeaponProficiencyExperience(const InputMessagePtr& msg)
 {
     msg->getU16(); // itemId
@@ -6739,4 +6765,254 @@ PaperdollPtr ProtocolGame::getPaperdoll(const InputMessagePtr& msg) const {
         paperdoll->setShader(shader);
 
     return paperdoll;
+}
+
+void ProtocolGame::parseTaskBoardData(const InputMessagePtr& msg)
+{
+    const auto subtype = static_cast<Otc::TaskBoardType_t>(msg->getU8());
+    switch (subtype) {
+        case Otc::TASK_BOARD_BOUNTY:
+            parseTaskBoardBountyData(msg);
+            break;
+        case Otc::TASK_BOARD_WEEKLY:
+            parseTaskBoardWeeklyData(msg);
+            break;
+        case Otc::TASK_BOARD_HUNT_SHOP:
+            parseTaskBoardShopData(msg);
+            break;
+        default:
+            g_logger.warning("[ProtocolGame::parseTaskBoardData] Unknown subtype {}", static_cast<uint8_t>(subtype));
+            break;
+    }
+}
+
+void ProtocolGame::parseTaskBoardBountyData(const InputMessagePtr& msg)
+{
+    TaskBoardBountyHeaderData headerData;
+    std::vector<TaskBoardBountyMonsterData> monsters;
+    std::vector<TaskBoardTalismanData> talismans;
+    std::vector<TaskBoardPreferredSlotData> preferredSlots;
+
+    const uint8_t offerCount = msg->getU8();
+    monsters.reserve(offerCount);
+    const bool hasSingleOffer = offerCount == 1;
+
+    for (uint8_t i = 0; i < offerCount; ++i) {
+        TaskBoardBountyMonsterData monster;
+        monster.taskIndex = msg->getU8();
+        monster.raceId = msg->getU16();
+        monster.totalKills = msg->getU16();
+        monster.rewardXp = msg->getU32();
+        monster.rewardPoints = msg->getU8();
+        monster.currentKills = msg->getU16();
+        msg->getU8(); // claim reward state (used by retail client button state)
+        monster.rarity = std::min<uint8_t>(msg->getU8(), 2);
+        // Server does not expose per-monster reroll reward; assume 1 for UI display.
+        monster.rewardReroll = 1;
+        monster.isActive = hasSingleOffer ? 1 : 0;
+        monster.isCompleted = (!hasSingleOffer && monster.totalKills > 0 && monster.currentKills >= monster.totalKills) ? 1 : 0;
+        monsters.emplace_back(monster);
+    }
+
+    headerData.rerollPoints = msg->getU8();
+    const auto rerollMode = static_cast<Otc::TaskBoardBountyRerollMode_t>(msg->getU8());
+    headerData.claimDaily = rerollMode == Otc::TASK_BOARD_BOUNTY_REROLL_DAILY_CLAIMABLE ? 1 : 0;
+    headerData.difficulty = std::clamp<uint8_t>(msg->getU8() + 1, 1, 4);
+
+    talismans.reserve(TaskBoard::TALISMAN_PATHS);
+    for (uint8_t i = 0; i < TaskBoard::TALISMAN_PATHS; ++i) {
+        TaskBoardTalismanData talisman;
+        const uint8_t currentLevel = msg->getU8();
+        msg->getU8(); // multiplier2 is unused on server
+        talisman.isActiveUpgrade = msg->getU8();
+        talisman.upgradeCost = msg->getU16();
+        talisman.currentValue = TaskBoard::getTalismanBonusHundredths(currentLevel, i);
+
+        const uint8_t maxLevel = TaskBoard::getTalismanMaxLevel(i);
+        if (currentLevel >= maxLevel || talisman.upgradeCost == 0) {
+            talisman.nextValue = 0;
+        } else {
+            talisman.nextValue = TaskBoard::getTalismanBonusHundredths(static_cast<uint8_t>(currentLevel + 1), i);
+        }
+        talismans.emplace_back(talisman);
+    }
+
+    const uint8_t preferredSlotCount = msg->getU8();
+    preferredSlots.reserve(preferredSlotCount);
+    for (uint8_t i = 0; i < preferredSlotCount; ++i) {
+        TaskBoardPreferredSlotData slot;
+        slot.slot = i + 1;
+        slot.locked = msg->getU8() == 0 ? 1 : 0;
+        slot.preferred = msg->getU16();
+        slot.unwanted = msg->getU16();
+        slot.price = 0;
+        preferredSlots.emplace_back(slot);
+    }
+
+    std::vector<std::map<std::string, uint32_t>> monsterData;
+    monsterData.reserve(monsters.size());
+    for (const auto& monster : monsters) {
+        monsterData.emplace_back(TaskBoard::toBountyMonsterMap(monster));
+    }
+
+    std::vector<std::map<std::string, uint32_t>> talismanData;
+    talismanData.reserve(talismans.size());
+    for (const auto& talisman : talismans) {
+        talismanData.emplace_back(TaskBoard::toTalismanMap(talisman));
+    }
+
+    g_lua.callGlobalField("g_game", "onBountyTaskData", TaskBoard::toBountyHeaderMap(headerData), monsterData, talismanData);
+
+    std::vector<std::map<std::string, uint32_t>> preferredSlotData;
+    preferredSlotData.reserve(preferredSlots.size());
+    for (const auto& slot : preferredSlots) {
+        preferredSlotData.emplace_back(TaskBoard::toPreferredSlotMap(slot));
+    }
+
+    g_lua.callGlobalField("g_game", "onBountyPreferredData", preferredSlotData, 0, TaskBoard::getAllMonsterRaceIds());
+}
+
+void ProtocolGame::parseTaskBoardWeeklyData(const InputMessagePtr& msg)
+{
+    TaskBoardWeeklyHeaderData headerData;
+    std::vector<TaskBoardWeeklyMonsterData> monsters;
+    std::vector<TaskBoardWeeklyItemData> items;
+
+    const uint16_t anyCreatureTotalKills = msg->getU16();
+    const uint16_t anyCreatureCurrentKills = msg->getU16();
+
+    const uint8_t killTasksCount = msg->getU8();
+    monsters.reserve(killTasksCount + ((anyCreatureTotalKills > 0 || anyCreatureCurrentKills > 0) ? 1 : 0));
+
+    if (anyCreatureTotalKills > 0 || anyCreatureCurrentKills > 0) {
+        TaskBoardWeeklyMonsterData anyCreatureTask;
+        anyCreatureTask.raceId = 0;
+        anyCreatureTask.total = anyCreatureTotalKills;
+        anyCreatureTask.current = anyCreatureCurrentKills;
+        anyCreatureTask.state = (anyCreatureTotalKills > 0 && anyCreatureCurrentKills >= anyCreatureTotalKills) ? 1 : 0;
+        monsters.emplace_back(anyCreatureTask);
+    }
+
+    for (uint8_t i = 0; i < killTasksCount; ++i) {
+        TaskBoardWeeklyMonsterData task;
+        task.raceId = msg->getU16();
+        task.total = msg->getU16();
+        task.current = msg->getU16();
+        task.state = (task.total > 0 && task.current >= task.total) ? 1 : 0;
+        monsters.emplace_back(task);
+    }
+
+    const uint8_t deliveryTasksCount = msg->getU8();
+    items.reserve(deliveryTasksCount);
+    for (uint8_t i = 0; i < deliveryTasksCount; ++i) {
+        TaskBoardWeeklyItemData task;
+        task.slotIndex = msg->getU8();
+        task.itemId = msg->getU16();
+        msg->getU8(); // unknown1
+        msg->getU8(); // unknown2
+        task.total = msg->getU32();
+        task.current = msg->getU32();
+        task.claimed = msg->getU8();
+        task.state = (task.claimed != 0 || (task.total > 0 && task.current >= task.total)) ? 1 : 0;
+        items.emplace_back(task);
+    }
+
+    const uint8_t difficultyMultiplier = msg->getU8();
+    headerData.maxExperience = msg->getU32();
+    headerData.maxDeliveryExperience = msg->getU32();
+    headerData.completedKillTasks = msg->getU8();
+    headerData.completedDeliveryTasks = msg->getU8();
+    const uint8_t weeklyProgressFinished = msg->getU8();
+    const uint8_t unlockedDifficulty = msg->getU8();
+    const uint32_t resetTimestamp = msg->getU32();
+    const uint8_t weeklyTaskExpansion = msg->getU8();
+    headerData.pointsEarned = msg->getU32();
+    headerData.soulsealsEarned = msg->getU32();
+
+    const bool hasGeneratedTasks = anyCreatureTotalKills > 0 || anyCreatureCurrentKills > 0 || killTasksCount > 0 || deliveryTasksCount > 0 || weeklyProgressFinished != 0;
+    headerData.difficulty = hasGeneratedTasks ? std::clamp<uint8_t>(difficultyMultiplier + 1, 1, 4) : 0;
+    headerData.currentPlayerLevel = m_localPlayer ? m_localPlayer->getLevel() : 0;
+    headerData.remainingDays = TaskBoard::getRemainingDaysUntil(resetTimestamp);
+    headerData.totalTaskSlots = weeklyTaskExpansion != 0 ? TaskBoard::WEEKLY_EXPANDED_SLOTS : TaskBoard::WEEKLY_BASE_SLOTS;
+    headerData.extraSlot = weeklyTaskExpansion != 0 ? 1 : 0;
+
+    auto headerMap = TaskBoard::toWeeklyHeaderMap(headerData);
+    headerMap["unlockedDifficulty"] = std::clamp<uint8_t>(unlockedDifficulty + 1, 1, 4);
+    headerMap["weeklyProgressFinished"] = weeklyProgressFinished;
+
+    std::vector<std::map<std::string, uint32_t>> monsterData;
+    monsterData.reserve(monsters.size());
+    for (const auto& monster : monsters) {
+        monsterData.emplace_back(TaskBoard::toWeeklyMonsterMap(monster));
+    }
+
+    std::vector<std::map<std::string, uint32_t>> itemData;
+    itemData.reserve(items.size());
+    for (const auto& item : items) {
+        itemData.emplace_back(TaskBoard::toWeeklyItemMap(item));
+    }
+
+    g_lua.callGlobalField("g_game", "onWeeklyTaskData", headerMap, monsterData, itemData);
+}
+
+void ProtocolGame::parseTaskBoardShopData(const InputMessagePtr& msg)
+{
+    std::vector<TaskBoardShopItemData> shopItems;
+    const uint8_t offersCount = msg->getU8();
+    shopItems.reserve(offersCount);
+
+    for (uint8_t i = 0; i < offersCount; ++i) {
+        TaskBoardShopItemData item;
+        item.id = i;
+
+        const auto offerType = static_cast<Otc::TaskBoardShopOfferType_t>(msg->getU8());
+        item.offerType = static_cast<uint8_t>(offerType);
+
+        if (offerType == Otc::TASK_BOARD_SHOP_OFFER_BONUS_PROMOTION) {
+            const uint16_t purchasedDisplayValue = msg->getU16();
+            item.nextCost = msg->getU32();
+            const uint8_t status = msg->getU8();
+
+            item.price = item.nextCost;
+            item.currentPurchases = purchasedDisplayValue > 0 ? purchasedDisplayValue - 1 : 0;
+            item.bought = (status == Otc::TASK_BOARD_SHOP_STATUS_BOUGHT || item.nextCost == 0) ? 1 : 0;
+        } else {
+            item.title = msg->getString();
+            item.description = msg->getString();
+            const uint32_t looktypeOrItemId = msg->getU32();
+
+            uint8_t addons = 0;
+            if (offerType == Otc::TASK_BOARD_SHOP_OFFER_OUTFIT) {
+                addons = msg->getU8();
+            }
+
+            if (offerType == Otc::TASK_BOARD_SHOP_OFFER_ITEM_DOUBLE) {
+                msg->getU32(); // second item id (double bundle) — not yet used by UI
+            }
+
+            item.price = msg->getU32();
+            const uint8_t status = msg->getU8();
+
+            if (offerType == Otc::TASK_BOARD_SHOP_OFFER_OUTFIT) {
+                item.lookType = looktypeOrItemId;
+                item.lookAddons = addons;
+            } else if (offerType == Otc::TASK_BOARD_SHOP_OFFER_MOUNT) {
+                item.lookType = looktypeOrItemId;
+            } else {
+                item.itemId = looktypeOrItemId;
+            }
+
+            item.bought = status == Otc::TASK_BOARD_SHOP_STATUS_BOUGHT ? 1 : 0;
+        }
+
+        shopItems.emplace_back(item);
+    }
+
+    std::vector<std::map<std::string, std::string>> shopData;
+    shopData.reserve(shopItems.size());
+    for (const auto& item : shopItems) {
+        shopData.emplace_back(TaskBoard::toShopItemMap(item));
+    }
+
+    g_lua.callGlobalField("g_game", "onTaskHuntingShopData", shopData);
 }

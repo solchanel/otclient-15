@@ -84,7 +84,7 @@ namespace Proto
         GameServerFloorDescription = 75,
 
         // original tibia ONLY
-        GameServerWeeklyTaskData = 91,
+        GameServerTaskBoard = 91, // 0x5B - was GameServerWeeklyTaskData (multiplexes Bounty/Weekly/HuntShop on a leading sub-type byte)
         GameServerWeaponProficiencyExperience = 92,
         GameServerImbuementDurations = 93,
         GameServerPassiveCooldown = 94,
@@ -257,6 +257,7 @@ namespace Proto
 
         // NOTE: add any custom opcodes in this range
         // 51 - 99
+        ClientTaskBoardAction = 95, // Winter 2025 retail opcode
 
         // original tibia ONLY
         ClientImbuementDurations = 96,
@@ -328,6 +329,7 @@ namespace Proto
         ClientBosstiaryRequestSlotInfo = 175,
         ClientBosstiaryRequestSlotAction = 176,
         ClientRequestHighscore = 177,
+        ClientSoulSealsAction = 186, // Winter 2025 retail opcode (player picks a soulseal target)
         ClientCancelAttackAndFollow = 190,
         ClientForgeEnter = 191,
         ClientForgeBrowseHistory = 192,

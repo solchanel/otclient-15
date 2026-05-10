@@ -442,6 +442,8 @@ ResourceTypes = {
     LESSER_FRAGMENTS = 84,
     GREATER_FRAGMENTS = 85,
     WHEEL_OF_DESTINY = 86,
+    BOUNTY_POINTS = 86,             -- alias of WHEEL_OF_DESTINY (matches C++ Otc::RESOURCE_BOUNTY_POINTS)
+    SOULSEALS = 87,                 -- matches C++ Otc::RESOURCE_SOULSEALS_POINTS
     COIN_NORMAL = 90,
     COIN_TRANSFERRABLE = 91,
     COIN_AUCTION = 92,
@@ -469,6 +471,7 @@ CyclopediaCharacterInfoTypes = {
 
 StoreConst = {
     InstantRewardAccess = 233,
+    TASKHUNTING_THIRDSLOT = 13,
 }
 
 ExperienceRate = {

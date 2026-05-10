@@ -327,3 +327,12 @@ android/app/.cxx/
 android/.gradle/
 android/build/
 luajit-src/
+
+# TaskBoard port — local build artifacts and helper scripts (not committed)
+RelWithDebInfo/
+out/
+build_log.txt
+build.bat
+build-release.bat
+_*.bat
+build.ps1
