@@ -1885,7 +1885,12 @@ function onPreyListSelection(slot, races, nextFreeReroll, wildcards, option)
 end
 
 function onPreyWildcardSelection(slot, races, nextFreeReroll, wildcards, option)
-    updatePickSpecificPreyButton(slot, wildcards)
+    -- PREY_STATE_WILDCARD_SELECTION fires after the user spends 5 wildcards on
+    -- "Pick Specific Prey" - the server returns the full race list for the slot.
+    -- Previously this was a stub that only refreshed a button, so nothing visible
+    -- happened on the first click and the user would click again (another 5 WC).
+    -- Reuse the list-selection flow: it opens the monster picker window.
+    onPreyListSelection(slot, races, nextFreeReroll, wildcards, option)
 end
 
 function Prey.onResourcesBalanceChange(balance, oldBalance, type)
