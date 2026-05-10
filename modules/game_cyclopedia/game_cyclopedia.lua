@@ -494,7 +494,17 @@ function show(defaultWindow)
     controllerCyclopedia.ui:raise()
     controllerCyclopedia.ui:focus()
     SelectWindow(defaultWindow, false)
-    controllerCyclopedia.ui.GoldBase.Value:setText(Cyclopedia.formatGold(g_game.getLocalPlayer():getTotalMoney()))
+
+    -- Ask server to push a resource-balance update. On first open the cache
+    -- may be stale/empty (server hasn't pushed balance since login), which
+    -- would show gold=0. onResourcesBalanceChange() then refreshes the gold
+    -- label reactively via the signal connected in registerEvents above.
+    local player = g_game.getLocalPlayer()
+    if player and g_game.requestResourceBalance then
+        g_game.requestResourceBalance()
+    end
+
+    controllerCyclopedia.ui.GoldBase.Value:setText(Cyclopedia.formatGold(player and player:getTotalMoney() or 0))
 end
 
 function toggleBack()

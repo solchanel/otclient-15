@@ -974,6 +974,7 @@ BosstiaryItem < UIWidget
     text-auto-resize: true
     color: #C1C1C1
     @onCheckChange: |
+      if self._silent then return end
       g_game.sendStatusTrackerBestiary(self:getParent():getId(),self:isChecked())
   UICreature
     id: Sprite

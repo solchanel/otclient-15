@@ -208,12 +208,35 @@ function Cyclopedia.loadBestiarySelectedCreature(data)
         data.lastProgressKillCount, fullText))
     UI.ListBase.CreatureInfo.LeftBase.TrackCheck.raceId = data.id
 
-    -- TODO investigate when it can be track-- idk when
-    --[[     if data.currentLevel == 1 then
-        UI.ListBase.CreatureInfo.LeftBase.TrackCheck:enable()
-    else
-        UI.ListBase.CreatureInfo.LeftBase.TrackCheck:disable()
-    end ]]
+    -- Charm Selection panel: neither otclient nor otc1523 wires the in-panel
+    -- combo (CharmSelector is ComboBox with enabled:false). In the official
+    -- client, the Select button opens the Charms tab with this creature
+    -- pre-selected, so we mirror that flow: enable the button only when the
+    -- creature is fully unlocked, then switch tabs and seed
+    -- Cyclopedia.Charms.SelectedCreature so the charms tab highlights the
+    -- right raceId.
+    local selectBtn = UI.ListBase.CreatureInfo.SelectButton
+    if selectBtn then
+        local fullyUnlocked = data.killCounter >= data.lastProgressKillCount
+        selectBtn:setEnabled(fullyUnlocked)
+        selectBtn.raceId = data.id
+        selectBtn:setTooltip(fullyUnlocked and
+            tr("Assign a charm to this creature.") or
+            tr("Defeat all creatures of this kind to unlock charms."))
+        selectBtn.onClick = function(widget)
+            local raceId = widget.raceId or 0
+            if raceId == 0 then return end
+            if Cyclopedia.Charms then
+                Cyclopedia.Charms.SelectedCreature = raceId
+            end
+            -- SelectWindow is defined in game_cyclopedia.lua and exported at
+            -- module scope via `function SelectWindow(...)`; switching to the
+            -- charms tab triggers showCharms() which requests bestiary data.
+            if SelectWindow then
+                SelectWindow("charms", false)
+            end
+        end
+    end
 
     -- Ensure storedRaceIDs is populated from cached tracker data before checking
     Cyclopedia.ensureStoredRaceIDsPopulated()
@@ -312,6 +335,44 @@ end
 function Cyclopedia.ShowBestiaryCreature()
     Cyclopedia.Bestiary.Stage = STAGES.CREATURE
     Cyclopedia.onStageChange()
+    Cyclopedia.ClearBestiarySelectedCreature()
+end
+
+-- Wipe every field the previous monster populated so a parse failure on the
+-- new request doesn't leave stale data visible in the UI.
+function Cyclopedia.ClearBestiarySelectedCreature()
+    local ci = UI.ListBase.CreatureInfo
+    if not ci then return end
+
+    pcall(function() ci:setText(tr('Loading...')) end)
+    pcall(function() ci.LeftBase.Sprite:setOutfit({ type = 0 }) end)
+    pcall(function() ci.ProgressValue:setText('') end)
+
+    -- Blank progress bars
+    for _, name in ipairs({ 'ProgressBack', 'ProgressBack33', 'ProgressBack55' }) do
+        local w = ci[name]
+        if w then pcall(function() w.Fill:setWidth(0) end) end
+    end
+
+    -- Blank diamonds + stars
+    if ci.DiamondFill then pcall(function() ci.DiamondFill:setWidth(0) end) end
+    if ci.StarFill    then pcall(function() ci.StarFill:setWidth(0)    end) end
+
+    -- Text fields (description, health, exp, speed, armor, mitigation, location, charm)
+    for _, fld in ipairs({ 'Description', 'HealthValue', 'ExperienceValue',
+                           'SpeedValue', 'ArmorValue', 'MitigationValue',
+                           'LocationValue', 'CharmValue', 'AttackModeValue' }) do
+        local w = ci[fld]
+        if w and w.setText then pcall(function() w:setText('-') end) end
+    end
+
+    -- Clear item list + element widgets
+    if ci.ItemsBase and ci.ItemsBase.Itemlist then
+        pcall(function() ci.ItemsBase.Itemlist:destroyChildren() end)
+    end
+    if ci.ElementsBase then
+        pcall(function() ci.ElementsBase:destroyChildren() end)
+    end
 end
 
 function Cyclopedia.ShowBestiaryCreatures(Category)
@@ -327,7 +388,17 @@ function Cyclopedia.CreateBestiaryCategoryItem(Data)
 
     local widget = g_ui.createWidget("BestiaryCategory", UI.ListBase.CategoryList)
     widget:setText(Data.name)
-    widget.ClassIcon:setImageSource("/game_cyclopedia/images/bestiary/creatures/" .. Data.name:lower():gsub(" ", "_"))
+
+    -- Some newer races (e.g. "Inkborn" added in recent Tibia versions) don't yet
+    -- have a corresponding icon in modules/game_cyclopedia/images/bestiary/creatures/.
+    -- Falling back to the generic "humanoid" icon avoids a spammy texture-load
+    -- error and an empty image slot.
+    local iconName = Data.name:lower():gsub(" ", "_")
+    local iconPath = "/game_cyclopedia/images/bestiary/creatures/" .. iconName
+    if not g_resources.fileExists(iconPath .. ".png") then
+        iconPath = "/game_cyclopedia/images/bestiary/creatures/humanoid"
+    end
+    widget.ClassIcon:setImageSource(iconPath)
     widget.Category = Data.name
     widget:setColor("#C0C0C0")
     widget.TotalValue:setText(string.format("Total: %d", Data.amount))
@@ -918,25 +989,20 @@ function Cyclopedia.onParseCyclopediaTracker(trackerType, data)
         return
     end
 
-    -- If server returns empty data, don't clear existing cached data
-    if #data == 0 then
-        return
-    end
-
     local isBoss = trackerType == 1
     local window = isBoss and trackerMiniWindowBosstiary or trackerMiniWindow
+    if not window then return end
 
-    -- Store the original data for re-sorting
+    -- Store the current server-sent list (including empty) so the UI always
+    -- reflects reality. An earlier guard skipped empty data to protect against
+    -- transient empty pushes, but it also stranded the last widget when the
+    -- player untracked their only remaining entry.
     if isBoss then
         Cyclopedia.storedBosstiaryTrackerData = data
-        -- Save to persistent storage
         Cyclopedia.saveTrackerData("bosstiary", data)
     else
         Cyclopedia.storedTrackerData = data
-        -- Save to persistent storage
         Cyclopedia.saveTrackerData("bestiary", data)
-        
-        -- Clear and repopulate storedRaceIDs only for bestiary tracker
         storedRaceIDs = {}
     end
 
@@ -1374,8 +1440,16 @@ function onTrackerClick(widget, mousePosition, mouseButton)
     menu:setGameMenu(true)
     menu:addOption("stop Tracking " .. widget.label:getText(), function()
         g_game.sendStatusTrackerBestiary(taskId, false)
+        -- Optimistic UI: destroy the widget immediately so the user sees it
+        -- leave the tracker even if the server response is delayed / empty.
+        if widget and not widget:isDestroyed() then
+            widget:destroy()
+        end
     end)
-    menu:display(menuPosition)
+    -- Use the actual click position — the previous `menuPosition` global was
+    -- never defined, which made popups open at (0,0) and caused the first
+    -- widget's menu to sit behind other UI, eating its click.
+    menu:display(mousePosition)
 
     return true
 end

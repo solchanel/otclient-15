@@ -150,11 +150,12 @@ function Cyclopedia.CreateBosstiaryCreature(data)
         widget:setText(format(data.name))
         if g_game.getClientVersion() >= 1320 then
             widget.TrackCheck:enable()
-            if data.isTrackerActived == 1 then
-                widget.TrackCheck:setChecked(true)
-            else
-                widget.TrackCheck:setChecked(false)
-            end
+            -- Block the @onCheckChange handler while we sync UI state from
+            -- server data. Otherwise setChecked() fires it, we echo back to
+            -- server, server re-pushes data, and the page resets to 1.
+            widget.TrackCheck._silent = true
+            widget.TrackCheck:setChecked(data.isTrackerActived == 1)
+            widget.TrackCheck._silent = false
         else
             widget.TrackCheck:hide()
         end
@@ -171,12 +172,25 @@ function Cyclopedia.LoadBosstiaryCreatures(data)
     end
     local maxCategoriesPerPage = 8
 
+    -- Preserve the user's current page across data refreshes (e.g. when the
+    -- server pushes bosstiary data after a track toggle). Only clamp to 1 on
+    -- first load or when the stored page is out of range.
+    local previousPage = Cyclopedia.Bosstiary.Page or 1
+
     Cyclopedia.Bosstiary.Creatures = {}
     Cyclopedia.Bosstiary.NotVisibleCreatures = {}
-    Cyclopedia.Bosstiary.Page = 1
     Cyclopedia.Bosstiary.TotalPages = math.ceil(#data / maxCategoriesPerPage)
+    if previousPage < 1 or previousPage > Cyclopedia.Bosstiary.TotalPages then
+        previousPage = 1
+    end
+    Cyclopedia.Bosstiary.Page = previousPage
 
-    UI.PageValue:setText(string.format("%d / %d", Cyclopedia.Bosstiary.Page, Cyclopedia.Bosstiary.TotalPages))
+    -- Server can push bosstiary data before the Bosstiary tab has been opened
+    -- for the first time, in which case UI.PageValue isn't in the widget tree
+    -- yet (bestiary.lua has an identical nil-guard at line 531).
+    if UI.PageValue then
+        UI.PageValue:setText(string.format("%d / %d", Cyclopedia.Bosstiary.Page, Cyclopedia.Bosstiary.TotalPages))
+    end
 
     local page = 1
 
@@ -257,7 +271,9 @@ function Cyclopedia.verifyBosstiaryButtons()
     end
 
     local function updatePageValue(currentPage, maxPages)
-        UI.PageValue:setText(string.format("%d / %d", currentPage, maxPages))
+        if UI and UI.PageValue then
+            UI.PageValue:setText(string.format("%d / %d", currentPage, maxPages))
+        end
     end
 
     updateButtonState(UI.PrevPageButton, page > 1)
@@ -429,7 +445,9 @@ function Cyclopedia.ReadjustPages()
         Cyclopedia.Bosstiary.Page = 1
     end
 
-    UI.PageValue:setText(string.format("%d / %d", Cyclopedia.Bosstiary.Page, Cyclopedia.Bosstiary.TotalPages))
+    if UI and UI.PageValue then
+        UI.PageValue:setText(string.format("%d / %d", Cyclopedia.Bosstiary.Page, Cyclopedia.Bosstiary.TotalPages))
+    end
     Cyclopedia.LoadBosstiaryCreature(Cyclopedia.Bosstiary.Page)
     Cyclopedia.verifyBosstiaryButtons()
 end
