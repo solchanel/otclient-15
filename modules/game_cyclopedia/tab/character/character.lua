@@ -1320,37 +1320,102 @@ local  function getWeaponSkillName(skillType)
     function Cyclopedia.onCyclopediaCharacterOffenceStats(data)
         UI.OffenceStats.rightPanel:destroyChildren()
         UI.OffenceStats.leftPanel:destroyChildren()
-    
-        local attackValue = data.weaponAttack + data.weaponFlatModifier + data.weaponDamage + data.weaponSkillLevel
+
+        -- Sanitize uint16 sentinels (0xFFFF) sent by server when weapon fields don't apply (e.g. casters)
+        local function clampU16(v)
+            v = v or 0
+            return (v >= 0xFFFF) and 0 or v
+        end
+
+        -- CipSoft 15.22 servers (and OTSes derived from them) send the total of
+        -- life leech / mana leech / crit chance / crit damage but leave every
+        -- breakdown slot at 0. The breakdowns then don't add up to the total,
+        -- which looks broken. When that happens, attribute the total to
+        -- "From Equipment" (the most common source) so the numbers add up.
+        -- If any breakdown is populated we trust the server and leave things alone.
+        local function attributeIfEmpty(total, equipment, imbuement, wheel, event)
+            total     = total     or 0
+            equipment = equipment or 0
+            imbuement = imbuement or 0
+            wheel     = wheel     or 0
+            event     = event     or 0
+            if total > 0 and equipment == 0 and imbuement == 0 and wheel == 0 and event == 0 then
+                equipment = total
+            end
+            return equipment, imbuement, wheel, event
+        end
+
+        local llEq, llImb, llWh, llEvt = attributeIfEmpty(
+            data.lifeLeechTotal, data.lifeLeechEquipament,
+            data.lifeLeechImbuement, data.lifeLeechWheel, data.lifeLeechEventBonus)
+
+        local mlEq, mlImb, mlWh, mlEvt = attributeIfEmpty(
+            data.manaLeechTotal, data.manaLeechEquipament,
+            data.manaLeechImbuement, data.manaLeechWheel, data.manaLeechEventBonus)
+
+        -- Crit chance breakdown: server sends Flat (base) + Equipament + Imbuement + Wheel + Concoction.
+        -- Treat Flat like the "base" slot in the empty-fallback logic.
+        local function attributeCritIfEmpty(total, base, equipment, imbuement, wheel, concoction)
+            total      = total      or 0
+            base       = base       or 0
+            equipment  = equipment  or 0
+            imbuement  = imbuement  or 0
+            wheel      = wheel      or 0
+            concoction = concoction or 0
+            if total > 0 and base == 0 and equipment == 0 and imbuement == 0 and wheel == 0 and concoction == 0 then
+                equipment = total
+            end
+            return base, equipment, imbuement, wheel, concoction
+        end
+
+        local ccBase, ccEq, ccImb, ccWh, ccCon = attributeCritIfEmpty(
+            data.critChanceTotal, data.critChanceFlat, data.critChanceEquipament,
+            data.critChanceImbuement, data.critChanceWheel, data.critChanceConcoction)
+
+        local cdBase, cdEq, cdImb, cdWh, cdCon = attributeCritIfEmpty(
+            data.critDamageTotal, data.critDamageFlat, data.critDamageEquipament,
+            data.critDamageImbuement, data.critDamageWheel, data.critDamageConcoction)
+        local weaponAttack       = clampU16(data.weaponAttack)
+        local weaponFlatModifier = clampU16(data.weaponFlatModifier)
+        local weaponDamage       = clampU16(data.weaponDamage)
+        local weaponSkillLevel   = clampU16(data.weaponSkillLevel)
+
+        local attackValue = weaponAttack + weaponFlatModifier + weaponDamage + weaponSkillLevel
         local stats = {
             {name = "Flat Damage and healing", value = data.flatDamage or 0, icon = false, percent = false},
             {name = "Attack Value", value = attackValue, icon = true, weaponElement = data.weaponElement},
-            {name = "From Base Attack", value = data.weaponAttack or 0, align = "center", icon = false},
-            {name = "From Equipment", value = data.weaponFlatModifier or 0, align = "center", icon = false},
-    
-            {name = getWeaponSkillName(data.weaponSkillType), value = data.weaponSkillLevel or 0, align = "center", icon = false},
-            {name = "From Combat Tactics", value = data.weaponDamage or 0, align = "center", icon = false},
-    
+            {name = "From Base Attack", value = weaponAttack, align = "center", icon = false},
+            {name = "From Equipment", value = weaponFlatModifier, align = "center", icon = false},
+
+            {name = getWeaponSkillName(data.weaponSkillType), value = weaponSkillLevel, align = "center", icon = false},
+            {name = "From Combat Tactics", value = weaponDamage, align = "center", icon = false},
+
             {name = "Life Leech", value = data.lifeLeechTotal or 0, icon = false, percent = true},
-            {name = "From Base", value = data.lifeLeechEquipament or 0, align = "center", percent = true, icon = false},
-            {name = "From Equipment", value = data.lifeLeechImbuement or 0, align = "center", percent = true, icon = false},
-            {name = "From Wheel", value = data.lifeLeechWheel or 0, align = "center", percent = true, icon = false},
-    
+            {name = "From Equipment", value = llEq, align = "center", percent = true, icon = false},
+            {name = "From Imbuement", value = llImb, align = "center", percent = true, icon = false},
+            {name = "From Wheel", value = llWh, align = "center", percent = true, icon = false},
+            {name = "From Amplification", value = llEvt, align = "center", percent = true, icon = false},
+
             {name = "Mana Leech", value = data.manaLeechTotal or 0, icon = false, percent = true},
-            {name = "From Base", value = data.manaLeechEquipament or 0, align = "center", percent = true, icon = false},
-            {name = "From Equipment", value = data.manaLeechImbuement or 0, align = "center", percent = true, icon = false},
-            {name = "From Wheel", value = data.manaLeechWheel or 0, align = "center", percent = true, icon = false},
-    
+            {name = "From Equipment", value = mlEq, align = "center", percent = true, icon = false},
+            {name = "From Imbuement", value = mlImb, align = "center", percent = true, icon = false},
+            {name = "From Wheel", value = mlWh, align = "center", percent = true, icon = false},
+            {name = "From Amplification", value = mlEvt, align = "center", percent = true, icon = false},
+
             {name = "Onslaught", value = data.onslaught or 0, icon = false, percent = true},
             {name = "From Base", value = data.onslaughtBase or 0, align = "center", percent = true, icon = false},
             {name = "From Amplification", value = data.onslaughtBonus or 0, align = "center", percent = true, icon = false},
-    
+
             {name = "Critical Hit", parent = "right", value = "", icon = false},
             {name = "     Chance", parent = "right", value = data.critChanceTotal or 0, percent = true, icon = false},
-            {name = "     Extra Damage", parent = "right", value = data.critChanceFlat or 0, percent = true, icon = false},
-            {name = "From Base", parent = "right", value = data.critChanceEquipament or 0, align = "center", percent = true, icon = false},
-            {name = "From Equipment", parent = "right", value = data.critDamageImbuement or 0, align = "center", percent = true, icon = false},
-            {name = "From Wheel", parent = "right", value = data.critDamageWheel or 0, align = "center", percent = true, icon = false}
+            {name = "From Base", parent = "right", value = ccBase, align = "center", percent = true, icon = false},
+            {name = "From Equipment", parent = "right", value = ccEq, align = "center", percent = true, icon = false},
+            {name = "From Wheel", parent = "right", value = ccWh, align = "center", percent = true, icon = false},
+
+            {name = "     Extra Damage", parent = "right", value = data.critDamageTotal or 0, percent = true, icon = false},
+            {name = "From Base", parent = "right", value = cdBase, align = "center", percent = true, icon = false},
+            {name = "From Equipment", parent = "right", value = cdEq, align = "center", percent = true, icon = false},
+            {name = "From Wheel", parent = "right", value = cdWh, align = "center", percent = true, icon = false}
         }
         
         if data.perfectShotDamage then

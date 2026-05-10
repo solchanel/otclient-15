@@ -724,52 +724,52 @@ struct DailyRewardData
 
 struct CyclopediaCharacterOffenceStats
 {
-    double critChanceTotal;
-    double critChanceFlat;
-    double critChanceEquipament;
-    double critChanceImbuement;
-    double critChanceWheel;
-    double critChanceConcoction;
+    double critChanceTotal{ 0 };
+    double critChanceFlat{ 0 };
+    double critChanceEquipament{ 0 };
+    double critChanceImbuement{ 0 };
+    double critChanceWheel{ 0 };
+    double critChanceConcoction{ 0 };
 
-    double critDamageTotal;
-    double critDamageFlat;
-    double critDamageEquipament;
-    double critDamageImbuement;
-    double critDamageWheel;
-    double critDamageConcoction;
+    double critDamageTotal{ 0 };
+    double critDamageFlat{ 0 };
+    double critDamageEquipament{ 0 };
+    double critDamageImbuement{ 0 };
+    double critDamageWheel{ 0 };
+    double critDamageConcoction{ 0 };
 
-    double lifeLeechTotal;
-    double lifeLeechEquipament;
-    double lifeLeechImbuement;
-    double lifeLeechWheel;
-    double lifeLeechEventBonus;
+    double lifeLeechTotal{ 0 };
+    double lifeLeechEquipament{ 0 };
+    double lifeLeechImbuement{ 0 };
+    double lifeLeechWheel{ 0 };
+    double lifeLeechEventBonus{ 0 };
 
-    double manaLeechTotal;
-    double manaLeechEquipament;
-    double manaLeechImbuement;
-    double manaLeechWheel;
-    double manaLeechEventBonus;
+    double manaLeechTotal{ 0 };
+    double manaLeechEquipament{ 0 };
+    double manaLeechImbuement{ 0 };
+    double manaLeechWheel{ 0 };
+    double manaLeechEventBonus{ 0 };
 
-    double onslaught;
-    double onslaughtBase;
-    double onslaughtBonus;
+    double onslaught{ 0 };
+    double onslaughtBase{ 0 };
+    double onslaughtBonus{ 0 };
 
-    double cleavePercent;
+    double cleavePercent{ 0 };
 
     std::vector<uint16_t> perfectShotDamage;
 
-    uint16_t flatDamage;
-    uint16_t flatDamageBase;
+    uint16_t flatDamage{ 0 };
+    uint16_t flatDamageBase{ 0 };
 
-    uint16_t weaponAttack;
-    uint16_t weaponFlatModifier;
-    uint16_t weaponDamage;
-    uint8_t weaponSkillType;
-    uint16_t weaponSkillLevel;
-    uint16_t weaponSkillModifier;
-    uint8_t weaponElement;
-    double weaponElementDamage;
-    uint8_t weaponElementType;
+    uint16_t weaponAttack{ 0 };
+    uint16_t weaponFlatModifier{ 0 };
+    uint16_t weaponDamage{ 0 };
+    uint8_t weaponSkillType{ 0 };
+    uint16_t weaponSkillLevel{ 0 };
+    uint16_t weaponSkillModifier{ 0 };
+    uint8_t weaponElement{ 0 };
+    double weaponElementDamage{ 0 };
+    uint8_t weaponElementType{ 0 };
     std::vector<double> weaponAccuracy;
 };
 

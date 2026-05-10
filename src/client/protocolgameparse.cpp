@@ -4985,12 +4985,10 @@ void ProtocolGame::parseCyclopediaCharacterInfo(const InputMessagePtr& msg)
             CyclopediaCharacterGeneralStats stats;
             stats.experience = msg->getU64();
             stats.level = msg->getU16();
-            stats.levelPercent = msg->getU8();
-            if (g_game.getClientVersion() >= 1512) {
-                stats.levelPercent = msg->getU16() / 100;
-            } else {
-                stats.levelPercent = msg->getU8();;
-            }
+            // levelPercent is U16 (percent x 100) on CipSoft 15.22 / Gunzo servers; U8 on older.
+            // Matches the gate used in parsePlayerStats (line 2739).
+            // Struct field stays U8 because Lua (character.lua:779) treats it as 0-100.
+            stats.levelPercent = (g_game.getClientVersion() >= 1522) ? static_cast<uint8_t>(msg->getU16() / 100) : msg->getU8();
             stats.baseExpGain = msg->getU16();
             if (g_game.getFeature(Otc::GameTournamentPackets)) {
                 msg->getU32(); // tournament exp(deprecated)
@@ -5481,13 +5479,6 @@ void ProtocolGame::parseCyclopediaCharacterInfo(const InputMessagePtr& msg)
                 msg->getU8(); // unused
                 msg->getU8(); // unused
                 msg->getU8(); // unused
-
-                if (g_game.getClientVersion() >= 1520) {
-                    msg->getDouble(); // damage to targets above 95% hp
-                    msg->getDouble(); // damage to targets below 30% hp
-                    msg->getDouble(); // armor penetration multiplier
-                    msg->getU8(); // elemental pierce count
-                }
             }
 
             g_game.processCyclopediaCharacterOffenceStats(data);
