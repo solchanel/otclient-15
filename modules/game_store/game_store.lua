@@ -575,7 +575,12 @@ end
 
 function onParseStoreCreateHome(offer)
     local homeProductos = controllerShop.ui.HomePanel.HomeRecentlyAdded.HomeProductos
-    for _, product in ipairs(offer.offers) do
+    if not homeProductos then
+        enableAllButtons()
+        return
+    end
+
+    for _, product in ipairs(offer.offers or {}) do
         local row = g_ui.createWidget('RowStore', homeProductos)
         row.product, row.type = product, product.type
 
@@ -583,9 +588,8 @@ function onParseStoreCreateHome(offer)
         nameLabel:setText(product.name)
         nameLabel:setTextAlign(AlignCenter)
         nameLabel:setMarginRight(10)
-        
-        local subOfferWidget = g_ui.createWidget('stackOfferPanel', row:getChildById('StackOffers'))
 
+        local subOfferWidget = g_ui.createWidget('stackOfferPanel', row:getChildById('StackOffers'))
         subOfferWidget.lblPrice:setText(product.price)
         if product.coinType == GameStore.CoinType.Transferable then
             subOfferWidget.lblPrice:setIcon("/game_store/images/icon-tibiacointransferable")
@@ -597,10 +601,17 @@ function onParseStoreCreateHome(offer)
         end
     end
 
-    local ramdomImg = offer.banners[math.random(1, #offer.banners)].image
-    setImagenHttp(controllerShop.ui.HomePanel.HomeImagen, ramdomImg, false)
+    -- math.random(1, 0) throws — guard against missing/empty banners so
+    -- the function never aborts mid-way and leaves buttons disabled.
+    local banners = offer.banners or {}
+    if #banners > 0 then
+        local ramdomImg = banners[math.random(1, #banners)].image
+        setImagenHttp(controllerShop.ui.HomePanel.HomeImagen, ramdomImg, false)
+        bannersHome = table.copy(banners)
+    else
+        bannersHome = {}
+    end
     enableAllButtons()
-    bannersHome = table.copy(offer.banners)
     showPanel("HomePanel")
     fixServerNoSend0xF2()
 end
@@ -769,8 +780,24 @@ function onParseStoreGetCategories(buttons)
                     controllerShop.ui.selectedOption:hide()
                 end
                 if category.name == "Home" then
+                    -- Short-circuit redundant clicks — server sends no
+                    -- response for re-requests on the same category and
+                    -- the disabled-buttons state would then be permanent.
+                    if controllerShop.ui.openedCategory == parent then
+                        enableAllButtons()
+                        showPanel("HomePanel")
+                        return
+                    end
                     controllerShop.ui.HomePanel.HomeRecentlyAdded.HomeProductos:destroyChildren()
                     g_game.sendRequestStoreHome()
+                    -- CrystalServer does not reliably send a StoreOffers
+                    -- response for ClientRequestStoreOffers(OPEN_HOME), so
+                    -- onParseStoreCreateHome never fires and buttons stay
+                    -- disabled forever. Re-enable immediately; if a real
+                    -- server response DOES arrive later, the Lua handler
+                    -- just calls enableAllButtons() again (idempotent).
+                    enableAllButtons()
+                    showPanel("HomePanel")
                 else
                     g_game.requestStoreOffers(category.name,"", 0, 1)
                 end

@@ -638,9 +638,27 @@ void ProtocolGame::parseMessage(const InputMessagePtr& msg)
                 case Proto::GameServerStore:
                     parseStore(msg);
                     break;
-                case Proto::GameServerStoreOffers:
-                    parseStoreOffers(msg);
+                case Proto::GameServerStoreOffers: {
+                    // Store-offer parsing is fragile against server format drift
+                    // (CrystalServer/canary occasionally add fields for new UI
+                    // features, e.g. "House Items" category). Failing here
+                    // shouldn't drop the connection — swallow the exception,
+                    // skip the rest of the store payload, and keep the session
+                    // alive so the user can at least stay logged in.
+                    const int _storeStart = msg->getReadPos();
+                    try {
+                        parseStoreOffers(msg);
+                    } catch (const std::exception& e) {
+                        g_logger.error(fmt::format(
+                            "[STORE] parseStoreOffers failed (startPos={} readPos={} unread={}): {} - skipping remaining store bytes",
+                            _storeStart, msg->getReadPos(), msg->getUnreadSize(), e.what()));
+                        // Skip whatever the server sent so the framework's
+                        // outer while-loop sees an empty message and terminates
+                        // cleanly instead of treating the leftovers as opcodes.
+                        msg->skipBytes(msg->getUnreadSize());
+                    }
                     break;
+                }
                 case Proto::GameServerStoreTransactionHistory:
                     parseStoreTransactionHistory(msg);
                     break;
@@ -1103,7 +1121,15 @@ void ProtocolGame::parseStoreOffers(const InputMessagePtr& msg)
                 }
 
                 offer.tryOnType = msg->getU8();
-                offer.collection = msg->getU16();
+                // `collection` is sent by CrystalServer/canary as a
+                // length-prefixed string (e.g. "Pets"), NOT a u16 id —
+                // only offers with empty collection happen to match the
+                // old u16 code path (len=0 -> 2 bytes -> value 0). Store
+                // the string's length in the u16 field for rough parity.
+                {
+                    const auto& collectionName = msg->getString();
+                    offer.collection = static_cast<uint16_t>(collectionName.size());
+                }
                 offer.popularityScore = msg->getU16();
                 offer.stateNewUntil = msg->getU32();
                 offer.userConfiguration = msg->getU8();
@@ -1186,10 +1212,15 @@ void ProtocolGame::parseStoreOffers(const InputMessagePtr& msg)
 
             offer.tryOnType = msg->getU8();
 
-            if (g_game.getClientVersion() <= 1310) {
-                auto test = msg->getString();
-            } else {
-                offer.collection = msg->getU16();
+            // CrystalServer/canary send `collection` as a length-prefixed
+            // string even on protocol > 1310 (the u16 version had always
+            // been wrong - it worked only because most offers have an
+            // empty collection, making u16=0 coincide with strlen=0).
+            // Always read as string; stash the length in the u16 field
+            // (no Lua code currently reads offer.collection).
+            {
+                const auto& collectionName = msg->getString();
+                offer.collection = static_cast<uint16_t>(collectionName.size());
             }
 
             offer.popularityScore = msg->getU16();
@@ -5571,15 +5602,19 @@ void ProtocolGame::parseOpenRewardWall(const InputMessagePtr& msg)
     std::string errorMessage = "";
     uint32_t timeLeft = 0;
 
-    if (wasDailyRewardTaken != 0) {// taken (player already took reward?)
+    // CipSoft 15.22 format (confirmed via IDA at 0x5bf6e0):
+    // errorMessage is ONLY present when wasDailyRewardTaken != 0
+    if (wasDailyRewardTaken != 0) {
         errorMessage = msg->getString(); // error message
-        const uint8_t token = msg->getU8();
-        if (token != 0) {
-            tokens = msg->getU16(); // Tokens
-        }
-    } else {
-        msg->getU8(); // Unknown
-        timeLeft = msg->getU32(); // time left to pickup reward without loosing streak
+    }
+
+    // rewardState is ALWAYS read (outside both branches)
+    const uint8_t rewardState = msg->getU8();
+    // rewardState: 0=no data, 1=tokens only, 2=timeLeft+tokens, 3/4=no data
+    if (rewardState == 2) {
+        timeLeft = msg->getU32(); // time left to pickup reward without losing streak
+    }
+    if (rewardState == 1 || rewardState == 2) {
         tokens = msg->getU16(); // Tokens
     }
 
