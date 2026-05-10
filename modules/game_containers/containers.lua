@@ -1119,21 +1119,23 @@ function onContainerOpen(container, previousContainer)
         panel:addChild(containerWindow)
     end
 
+    containerWindow:setup()
+
     if not previousContainer or previousContainer:getCapacity() >= container:getCapacity() then
-        -- Always set the content height based on the current container's content, with a minimum of one row
+        -- Always open containers fully expanded. Defer the hard setHeight
+        -- one tick past setup() because the mini-window's onGeometryChange
+        -- / dock logic otherwise clamps whatever we set synchronously here.
         local minRows = 1
-        if modules.client_options.getOption('openMaximized') then
-            local numLines = math.max(layout:getNumLines(), minRows)
-            containerWindow:setContentHeight(numLines * step + chromeHeight)
-        else
-            local numColumns = math.max(layout:getNumColumns(), 1)
-            local filledLines = math.max(math.ceil(container:getItemsCount() / numColumns), minRows)
-            containerWindow:setContentHeight(filledLines * step + chromeHeight)
-        end
+        local numLines = math.max(layout:getNumLines(), minRows)
+        local targetHeight = numLines * step + chromeHeight
+        containerWindow:setContentHeight(targetHeight)
+        scheduleEvent(function()
+            if containerWindow and not containerWindow:isDestroyed() then
+                containerWindow:setHeight(targetHeight + 18) -- +18 for title bar
+            end
+        end, 0)
     end
 
-    containerWindow:setup()
-    
     -- Apply current sorting mode if one is active and manual sort mode is disabled
     local currentSortMode = containerSettings and containerSettings['currentSortMode']
     local isManualSortEnabled = containerSettings and containerSettings['useManualSortMode'] == 1
