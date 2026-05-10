@@ -423,6 +423,8 @@ private:
 
     bool m_enableSendExtendedOpcode{ false };
     bool m_gameInitialized{ false };
+    bool m_hasPendingForgeConfig{ false };
+    ForgeConfigData m_pendingForgeConfig; // cached forge config until game start (Lua callbacks not yet connected)
     bool m_mapKnown{ false };
     bool m_firstRecv{ true };
     bool m_record{ false };

@@ -798,6 +798,12 @@ void ProtocolGame::parseEnterGame(const InputMessagePtr&)
     if (!m_gameInitialized) {
         g_game.processGameStart();
         m_gameInitialized = true;
+
+        // Re-emit forge config that arrived before Lua callbacks were registered
+        if (m_hasPendingForgeConfig) {
+            g_lua.callGlobalField("g_game", "forgeData", m_pendingForgeConfig);
+            m_hasPendingForgeConfig = false;
+        }
     }
 }
 
@@ -2088,7 +2094,22 @@ void ProtocolGame::parseItemClasses(const InputMessagePtr& msg)
         }
     }
 
-    g_lua.callGlobalField("g_game", "forgeData", forgeConfig);
+    if (!m_gameInitialized) {
+        // Cache for re-emission after game start (Lua callbacks not registered yet).
+        // Without this, the forgeData call below is dispatched into a void since
+        // game_forge.lua only connects its onForgeData handler in onGameStart.
+        m_pendingForgeConfig = forgeConfig;
+        m_hasPendingForgeConfig = true;
+    }
+
+    // Defer the Lua callback by one frame via the event dispatcher. Controller's
+    // onGameStart connects its event handlers inside addEvent(...), which runs
+    // on the NEXT tick. If we call forgeData synchronously here, g_game.forgeData
+    // isn't connected yet and the Lua callback is silently dropped. Deferring
+    // one tick ensures the module's events are already connected.
+    g_dispatcher.addEvent([forgeConfig]() {
+        g_lua.callGlobalField("g_game", "forgeData", forgeConfig);
+    });
 }
 
 void ProtocolGame::parseCreatureMark(const InputMessagePtr& msg)

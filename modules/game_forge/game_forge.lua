@@ -22,7 +22,26 @@ ForgeController.baseResult = Helpers.baseResult
 function ForgeController:onGameStart()
     if g_game.getFeature(GameForgeConvergence) then -- Summer Update 2017
         self:updateResourceBalances()
-        
+
+        -- Restore dust-limit cache from a prior session. The server only pushes
+        -- this value (opcode 0x86, sendForgingData) as part of the login burst,
+        -- and when the login-burst parse exception drops the tail of that
+        -- message the value is lost for this session. The cached value is
+        -- re-saved whenever a forge action causes the server to emit 0x86
+        -- again (see forgeData() below).
+        local char = g_game.getCharacterName()
+        if char and char ~= "" then
+            local cachedDustMax = g_settings.getNumber("forge_dustMax_" .. char)
+            local cachedDustCap = g_settings.getNumber("forge_dustCap_" .. char)
+            if cachedDustMax and cachedDustMax > 0 then
+                ForgeController.conversion.dustMax = cachedDustMax
+                ForgeController.conversion.dustMaxIncreaseCost = cachedDustMax - 75
+            end
+            if cachedDustCap and cachedDustCap > 0 then
+                ForgeController.conversion.dustCap = cachedDustCap
+            end
+        end
+
         -- Store event callbacks to prevent garbage collection
         self.callbacks.onBrowseForgeHistory = onBrowseForgeHistory
         self.callbacks.forgeData = forgeData
@@ -106,6 +125,14 @@ function ForgeController:show(skipRequest)
 
     if not skipRequest then
         g_game.openPortableForgeRequest()
+    end
+
+    -- Ask the server to push a fresh resource-balance dump (gold / bank / forge
+    -- dust / slivers / cores). Without this, the forge window opens with stale
+    -- zero balances until some other event (prey, cyclopedia, etc.) triggers a
+    -- balance update. See game_cyclopedia.lua for the same pattern.
+    if g_game.requestResourceBalance then
+        g_game.requestResourceBalance()
     end
 
     self.ui:centerIn('parent')
@@ -968,6 +995,17 @@ function forgeData(data)
     local dustMax = data.maxDustLevel or 100
     ForgeController.conversion.dustMax = dustMax
     ForgeController.conversion.dustMaxIncreaseCost = dustMax - 75
+
+    -- Persist per-character so the forge UI can show the correct value even
+    -- when the login-burst parse exception drops the initial sendForgingData
+    -- opcode. Value is refreshed whenever a forge action causes the server to
+    -- re-send 0x86 (fusion / transfer / conversion / increase-limit).
+    local char = g_game.getCharacterName()
+    if char and char ~= "" then
+        g_settings.set("forge_dustMax_" .. char, dustMax)
+        g_settings.set("forge_dustCap_" .. char, ForgeController.conversion.dustCap)
+    end
+
     ForgeController.conversion:handleButtons()
     -- CONVERSION
 end
